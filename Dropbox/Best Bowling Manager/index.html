@@ -1393,7 +1393,10 @@ function renderRosters() {
     for (const t of mensTeams) {
       const players = (t.players || []).map(pid => {
         const p = getPlayerById(pid);
-        return p ? p.name : pid;
+        if (p) {
+          return `<span class="player-link" onclick="showPlayerDetail('${pid}')" style="cursor:pointer;text-decoration:underline;color:#93c5fd;">${p.name}</span>`;
+        }
+        return pid;
       }).join(', ');
       html += `<div class="small mb-1"><strong>Team ${t.id}:</strong> ${players || 'No players'}</div>`;
     }
@@ -1404,10 +1407,105 @@ function renderRosters() {
     for (const t of dblTeams) {
       const players = (t.players || []).map(pid => {
         const p = getPlayerById(pid);
-        return p ? p.name : pid;
+        if (p) {
+          return `<span class="player-link" onclick="showPlayerDetail('${pid}')" style="cursor:pointer;text-decoration:underline;color:#6ee7b7;">${p.name}</span>`;
+        }
+        return pid;
       }).join(', ');
       html += `<div class="small mb-1"><strong>Team ${t.id}:</strong> ${players || 'No players'}</div>`;
     }
+  }
+  
+  container.innerHTML = html;
+}
+
+function showPlayerDetail(playerId) {
+  const container = document.getElementById('dashboardPlayerDetail');
+  if (!container) return;
+  
+  const player = getPlayerById(playerId);
+  if (!player) {
+    container.innerHTML = '<p class="muted small">Player not found.</p>';
+    return;
+  }
+  
+  // Find all results for this player
+  const playerResults = [];
+  for (const result of state.results) {
+    if (result.bowlers && Array.isArray(result.bowlers)) {
+      const bowler = result.bowlers.find(b => b.playerId === playerId);
+      if (bowler) {
+        playerResults.push({
+          result: result,
+          bowler: bowler,
+          league: result.league
+        });
+      }
+    }
+  }
+  
+  // Calculate averages
+  const mensGames = [];
+  const doublesGames = [];
+  
+  for (const pr of playerResults) {
+    if (pr.bowler.scores && Array.isArray(pr.bowler.scores)) {
+      for (const score of pr.bowler.scores) {
+        if (score > 0) {
+          if (pr.league === 'mens') {
+            mensGames.push(score);
+          } else {
+            doublesGames.push(score);
+          }
+        }
+      }
+    }
+  }
+  
+  const mensAvg = mensGames.length > 0 
+    ? (mensGames.reduce((a, b) => a + b, 0) / mensGames.length).toFixed(1)
+    : '-';
+  const doublesAvg = doublesGames.length > 0
+    ? (doublesGames.reduce((a, b) => a + b, 0) / doublesGames.length).toFixed(1)
+    : '-';
+  
+  let html = `<div style="margin-bottom:1rem;">
+    <h4 style="margin:0 0 0.5rem;color:#f97316;">${player.name}</h4>
+    <div class="small" style="margin-bottom:0.5rem;">
+      <strong>Starting Averages:</strong><br>
+      Men's: ${player.mensStart || 0} | Doubles: ${player.doublesStart || 0}
+    </div>
+    <div class="small" style="margin-bottom:0.5rem;">
+      <strong>Current Averages (from results):</strong><br>
+      Men's: ${mensAvg} (${mensGames.length} games) | Doubles: ${doublesAvg} (${doublesGames.length} games)
+    </div>
+  </div>`;
+  
+  if (playerResults.length > 0) {
+    html += '<div class="small"><strong>Recent Matches:</strong></div>';
+    html += '<table class="table" style="margin-top:0.5rem;font-size:0.8rem;"><thead><tr><th>Date</th><th>League</th><th>Game 1</th><th>Game 2</th><th>Total</th></tr></thead><tbody>';
+    
+    // Sort by date, most recent first
+    const sorted = [...playerResults].sort((a, b) => 
+      a.result.date > b.result.date ? -1 : 1
+    ).slice(0, 10); // Show last 10 matches
+    
+    for (const pr of sorted) {
+      const scores = pr.bowler.scores || [0, 0];
+      const total = scores.reduce((a, b) => a + b, 0);
+      const leagueLabel = pr.league === 'mens' ? 'M' : 'D';
+      html += `<tr>
+        <td>${formatDateLabel(pr.result.date)}</td>
+        <td>${leagueLabel}</td>
+        <td>${scores[0] || '-'}</td>
+        <td>${scores[1] || '-'}</td>
+        <td><strong>${total}</strong></td>
+      </tr>`;
+    }
+    
+    html += '</tbody></table>';
+  } else {
+    html += '<p class="muted small">No match results recorded yet for this player.</p>';
   }
   
   container.innerHTML = html;
@@ -1657,6 +1755,7 @@ window.restoreVersion = restoreVersion;
 window.attemptLogin = attemptLogin;
 window.viewOnlyMode = viewOnlyMode;
 window.setActiveTab = setActiveTab;
+window.showPlayerDetail = showPlayerDetail;
 
 // Start
 window.addEventListener('DOMContentLoaded', init);
