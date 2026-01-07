@@ -1,0 +1,6 @@
+services:
+  - type: web
+    name: thames-bowling
+    env: static
+    buildCommand: ""
+    staticPublishPath: .
