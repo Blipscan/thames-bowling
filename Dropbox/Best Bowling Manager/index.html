@@ -1862,6 +1862,11 @@ function openMatchForm(matchId) {
   const seriesANet = g1aNet + g2aNet;
   const seriesBNet = g1bNet + g2bNet;
 
+  // Determine winners for visual indicators
+  const g1Winner = g1aNet > g1bNet ? 'A' : (g1bNet > g1aNet ? 'B' : '');
+  const g2Winner = g2aNet > g2bNet ? 'A' : (g2bNet > g2aNet ? 'B' : '');
+  const seriesWinner = seriesANet > seriesBNet ? 'A' : (seriesBNet > seriesANet ? 'B' : '');
+
   let html = '';
   html += '<div class="card-header">';
   html += '<div><div class="card-title">' + formatDateLabel(match.date) + ' · ' + leagueLabel(match.league) + '</div>';
@@ -1869,76 +1874,145 @@ function openMatchForm(matchId) {
   html += '<div class="flex">';
   html += '<button class="btn btn-sm" type="button" onclick="rescheduleMatch(\'' + match.id + '\')">Reschedule</button>';
   html += '</div></div>';
-  html += '<div class="small muted mt-1">Tip: choose subs from the bowler dropdowns as needed.</div>';
 
-  html += '<div class="mt-2">';
-  html += '<div class="small" style="font-weight:600">Team ' + match.homeTeam + '</div>';
+  // Side-by-side team layout
+  html += '<div style="display:grid;grid-template-columns:1fr auto 1fr;gap:1rem;margin-top:1rem;align-items:start;">';
+  
+  // Team A (Home)
+  html += '<div style="background:#111827;border:1px solid #1f2937;border-radius:0.5rem;padding:1rem;">';
+  html += '<div class="small" style="font-weight:600;margin-bottom:0.75rem;color:#93c5fd;">Team ' + match.homeTeam + ' (Home)</div>';
+  
   for (let i = 0; i < slotsPerTeam; i++) {
     const idx = i + 1;
     const sc = scoresA[i];
     const g1 = sc[0] ?? '';
     const g2 = sc[1] ?? '';
-    html += '<div class="form-row"><label>Bowler ' + idx + '</label>' +
-      playerSelect('a' + idx, bowlersA[i], rosterA) +
-      ' G1 <input type="number" name="a' + idx + 'g1" value="' + g1 + '">' +
-      ' G2 <input type="number" name="a' + idx + 'g2" value="' + g2 + '"></div>';
+    html += '<div style="margin-bottom:0.75rem;">';
+    html += '<div class="small muted" style="margin-bottom:0.25rem;">Bowler ' + idx + '</div>';
+    html += '<div style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;">';
+    html += '<div style="flex:1;min-width:140px;">' + playerSelect('a' + idx, bowlersA[i], rosterA) + '</div>';
+    html += '<div style="display:flex;gap:0.5rem;align-items:center;">';
+    html += '<label class="small" style="min-width:25px;">G1:</label>';
+    html += '<input type="number" name="a' + idx + 'g1" value="' + g1 + '" style="width:60px;">';
+    html += '<label class="small" style="min-width:25px;margin-left:0.5rem;">G2:</label>';
+    html += '<input type="number" name="a' + idx + 'g2" value="' + g2 + '" style="width:60px;">';
+    html += '</div></div></div>';
   }
 
-  html += '<div class="mt-2 small" style="font-weight:600">Team ' + match.awayTeam + '</div>';
+  html += '<div style="border-top:1px solid #1f2937;margin-top:0.75rem;padding-top:0.75rem;">';
+  html += '<div class="small muted" style="margin-bottom:0.5rem;">Scratch Totals:</div>';
+  html += '<div class="small" style="margin-bottom:0.25rem;">G1: <strong>' + totalA1 + '</strong></div>';
+  html += '<div class="small" style="margin-bottom:0.25rem;">G2: <strong>' + totalA2 + '</strong></div>';
+  html += '<div class="small" style="margin-bottom:0.5rem;">Series: <strong>' + seriesAScratch + '</strong></div>';
+  html += '<div class="small muted" style="margin-bottom:0.5rem;">Handicap: <strong style="color:#0ea5e9;">' + (aGetsHp ? '+' + hpForNet : '0') + '</strong></div>';
+  html += '<div class="small" style="font-weight:600;margin-top:0.5rem;padding-top:0.5rem;border-top:1px solid #1f2937;">NET Totals:</div>';
+  html += '<div class="small" style="margin-bottom:0.25rem;">G1: <strong style="color:' + (g1Winner === 'A' ? '#6ee7b7' : '#9ca3af') + ';">' + g1aNet + (g1Winner === 'A' ? ' ✓' : '') + '</strong></div>';
+  html += '<div class="small" style="margin-bottom:0.25rem;">G2: <strong style="color:' + (g2Winner === 'A' ? '#6ee7b7' : '#9ca3af') + ';">' + g2aNet + (g2Winner === 'A' ? ' ✓' : '') + '</strong></div>';
+  html += '<div class="small">Series: <strong style="color:' + (seriesWinner === 'A' ? '#6ee7b7' : '#9ca3af') + ';">' + seriesANet + (seriesWinner === 'A' ? ' ✓' : '') + '</strong></div>';
+  html += '</div></div>';
+
+  // VS divider
+  html += '<div style="display:flex;align-items:center;justify-content:center;padding-top:2rem;">';
+  html += '<div style="font-weight:700;color:#f97316;font-size:1.2rem;">VS</div>';
+  html += '</div>';
+
+  // Team B (Away)
+  html += '<div style="background:#111827;border:1px solid #1f2937;border-radius:0.5rem;padding:1rem;">';
+  html += '<div class="small" style="font-weight:600;margin-bottom:0.75rem;color:#6ee7b7;">Team ' + match.awayTeam + ' (Away)</div>';
+  
   for (let i = 0; i < slotsPerTeam; i++) {
     const idx = i + 1;
     const sc = scoresB[i];
     const g1 = sc[0] ?? '';
     const g2 = sc[1] ?? '';
-    html += '<div class="form-row"><label>Bowler ' + idx + '</label>' +
-      playerSelect('b' + idx, bowlersB[i], rosterB) +
-      ' G1 <input type="number" name="b' + idx + 'g1" value="' + g1 + '">' +
-      ' G2 <input type="number" name="b' + idx + 'g2" value="' + g2 + '"></div>';
+    html += '<div style="margin-bottom:0.75rem;">';
+    html += '<div class="small muted" style="margin-bottom:0.25rem;">Bowler ' + idx + '</div>';
+    html += '<div style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;">';
+    html += '<div style="flex:1;min-width:140px;">' + playerSelect('b' + idx, bowlersB[i], rosterB) + '</div>';
+    html += '<div style="display:flex;gap:0.5rem;align-items:center;">';
+    html += '<label class="small" style="min-width:25px;">G1:</label>';
+    html += '<input type="number" name="b' + idx + 'g1" value="' + g1 + '" style="width:60px;">';
+    html += '<label class="small" style="min-width:25px;margin-left:0.5rem;">G2:</label>';
+    html += '<input type="number" name="b' + idx + 'g2" value="' + g2 + '" style="width:60px;">';
+    html += '</div></div></div>';
   }
 
-  html += '<div class="mt-2">';
-  html += '<div class="form-row"><label>Team Totals</label>';
-  html += '<span class="small">G1 scratch: ' + totalA1 + ' – ' + totalB1 + '</span>';
-  html += '<span class="small" style="margin-left:0.75rem;">G2 scratch: ' + totalA2 + ' – ' + totalB2 + '</span>';
-  html += '</div>';
-  html += '<div class="form-row small muted" style="margin-top:0.15rem;">';
-  html += '<span>Net after handicap: G1 ' + g1aNet + ' – ' + g1bNet + ', G2 ' + g2aNet + ' – ' + g2bNet + ', Series ' + seriesANet + ' – ' + seriesBNet + '.</span>';
-  html += '</div>';
-  html += '<div class="form-row small muted" style="margin-top:0.15rem;">';
-  html += '<span>Handicap ' +
-    (hpForNet
-      ? (hpForNet + ' pins to Team ' + (aGetsHp ? match.homeTeam : (bGetsHp ? match.awayTeam : '?')))
-      : '0 pins') +
-    ' is added to that team in every game. Game and series points are based on net scores after handicap.</span>';
-  html += '</div>';
+  html += '<div style="border-top:1px solid #1f2937;margin-top:0.75rem;padding-top:0.75rem;">';
+  html += '<div class="small muted" style="margin-bottom:0.5rem;">Scratch Totals:</div>';
+  html += '<div class="small" style="margin-bottom:0.25rem;">G1: <strong>' + totalB1 + '</strong></div>';
+  html += '<div class="small" style="margin-bottom:0.25rem;">G2: <strong>' + totalB2 + '</strong></div>';
+  html += '<div class="small" style="margin-bottom:0.5rem;">Series: <strong>' + seriesBScratch + '</strong></div>';
+  html += '<div class="small muted" style="margin-bottom:0.5rem;">Handicap: <strong style="color:#0ea5e9;">' + (bGetsHp ? '+' + hpForNet : '0') + '</strong></div>';
+  html += '<div class="small" style="font-weight:600;margin-top:0.5rem;padding-top:0.5rem;border-top:1px solid #1f2937;">NET Totals:</div>';
+  html += '<div class="small" style="margin-bottom:0.25rem;">G1: <strong style="color:' + (g1Winner === 'B' ? '#6ee7b7' : '#9ca3af') + ';">' + g1bNet + (g1Winner === 'B' ? ' ✓' : '') + '</strong></div>';
+  html += '<div class="small" style="margin-bottom:0.25rem;">G2: <strong style="color:' + (g2Winner === 'B' ? '#6ee7b7' : '#9ca3af') + ';">' + g2bNet + (g2Winner === 'B' ? ' ✓' : '') + '</strong></div>';
+  html += '<div class="small">Series: <strong style="color:' + (seriesWinner === 'B' ? '#6ee7b7' : '#9ca3af') + ';">' + seriesBNet + (seriesWinner === 'B' ? ' ✓' : '') + '</strong></div>';
+  html += '</div></div>';
 
-  html += '<div class="form-row"><label>Points</label>';
-  html += 'G1 <input type="text" name="ptsG1" value="' + ptsG1 + '" placeholder="A/B">';
-  html += ' G2 <input type="text" name="ptsG2" value="' + ptsG2 + '" placeholder="A/B">';
-  html += ' Series <input type="text" name="ptsSeries" value="' + ptsSeries + '" placeholder="A/B">';
-  html += '</div>';
+  html += '</div>'; // End side-by-side grid
 
-  html += '<div class="form-row small muted" style="margin-top:0.15rem;">';
-  html += '<span>Enter points as A/B. Game and series points are awarded to the team with the higher net score after handicap.</span>';
+  // Points section
+  html += '<div style="background:#111827;border:1px solid #1f2937;border-radius:0.5rem;padding:1rem;margin-top:1rem;">';
+  html += '<div class="small" style="font-weight:600;margin-bottom:0.75rem;">Points <span class="muted" style="font-weight:400;">(auto-calculated, click to edit)</span></div>';
+  html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;">';
+  
+  // Game 1 points
+  html += '<div style="display:flex;align-items:center;gap:0.5rem;">';
+  html += '<div class="small" style="min-width:60px;">Game 1:</div>';
+  html += '<input type="text" name="ptsG1" value="' + ptsG1 + '" placeholder="A/B" style="width:80px;text-align:center;">';
+  html += '<div class="small muted">Team ' + match.homeTeam + ' / Team ' + match.awayTeam + '</div>';
   html += '</div>';
+  
+  // Game 2 points
+  html += '<div style="display:flex;align-items:center;gap:0.5rem;">';
+  html += '<div class="small" style="min-width:60px;">Game 2:</div>';
+  html += '<input type="text" name="ptsG2" value="' + ptsG2 + '" placeholder="A/B" style="width:80px;text-align:center;">';
+  html += '<div class="small muted">Team ' + match.homeTeam + ' / Team ' + match.awayTeam + '</div>';
+  html += '</div>';
+  
+  // Series points
+  html += '<div style="display:flex;align-items:center;gap:0.5rem;">';
+  html += '<div class="small" style="min-width:60px;">Series:</div>';
+  html += '<input type="text" name="ptsSeries" value="' + ptsSeries + '" placeholder="A/B" style="width:80px;text-align:center;">';
+  html += '<div class="small muted">Team ' + match.homeTeam + ' / Team ' + match.awayTeam + '</div>';
+  html += '</div>';
+  
+  // Total points (calculated)
+  const [g1aPtsCalc, g1bPtsCalc] = ptsG1 ? ptsG1.split('/').map(x => parseInt(x) || 0) : [0, 0];
+  const [g2aPtsCalc, g2bPtsCalc] = ptsG2 ? ptsG2.split('/').map(x => parseInt(x) || 0) : [0, 0];
+  const [sAptsCalc, sBptsCalc] = ptsSeries ? ptsSeries.split('/').map(x => parseInt(x) || 0) : [0, 0];
+  const totalPtsA = g1aPtsCalc + g2aPtsCalc + sAptsCalc;
+  const totalPtsB = g1bPtsCalc + g2bPtsCalc + sBptsCalc;
+  html += '<div style="display:flex;align-items:center;gap:0.5rem;grid-column:1/-1;padding-top:0.5rem;border-top:1px solid #1f2937;margin-top:0.5rem;">';
+  html += '<div class="small" style="font-weight:600;min-width:60px;">Total:</div>';
+  html += '<div class="small" style="color:#93c5fd;"><strong>' + totalPtsA + '</strong> Team ' + match.homeTeam + '</div>';
+  html += '<div class="small muted">|</div>';
+  html += '<div class="small" style="color:#6ee7b7;"><strong>' + totalPtsB + '</strong> Team ' + match.awayTeam + '</div>';
+  html += '</div>';
+  
+  html += '</div></div>';
 
-  html += '<div class="form-row"><label>Handicap</label>';
+  // Handicap adjustment section (collapsible/compact)
+  html += '<div style="background:#0f172a;border:1px solid #1f2937;border-radius:0.5rem;padding:0.75rem;margin-top:1rem;">';
+  html += '<div style="display:flex;align-items:center;gap:0.75rem;flex-wrap:wrap;">';
+  html += '<div class="small muted">Handicap:</div>';
   html += '<input type="number" name="handicapPins" min="0" value="' +
-    (handicapPins !== null && handicapPins !== undefined ? handicapPins : '') + '">';
-  html += '<select name="lowerTeam">';
+    (handicapPins !== null && handicapPins !== undefined ? handicapPins : '') + '" style="width:60px;">';
+  html += '<div class="small muted">pins to</div>';
+  html += '<select name="lowerTeam" style="min-width:120px;">';
   html += '<option value="">Low team</option>';
   html += '<option value="A"' + (lowerTeam === 'A' ? ' selected' : '') + '>Team ' + match.homeTeam + '</option>';
   html += '<option value="B"' + (lowerTeam === 'B' ? ' selected' : '') + '>Team ' + match.awayTeam + '</option>';
   html += '</select>';
-  html += '<span class="small muted">80% of average difference; applied to the low team (same as Monday Packet).</span>';
+  html += '<div class="small muted" style="flex:1;">(80% of average difference; same as Monday Packet)</div>';
+  html += '</div>';
   html += '</div>';
 
-  html += '</div>';
-
-  html += '<div class="form-row" style="margin-top:0.6rem;">';
+  // Action buttons
+  html += '<div style="display:flex;gap:0.5rem;margin-top:1rem;align-items:center;">';
   html += '<button type="button" class="btn btn-sm" onclick="saveMatchForm(\'' + match.id + '\')">Save Result</button>';
-  html += '<button type="button" class="btn btn-sm btn-secondary" style="margin-left:0.4rem;" onclick="clearMatchForm()">Close</button>';
-  html += '<span class="muted small">Subs are just chosen from the bowler dropdowns.</span>';
+  html += '<button type="button" class="btn btn-sm btn-secondary" onclick="clearMatchForm()">Close</button>';
+  html += '<div class="small muted" style="margin-left:0.5rem;">💡 Tip: Choose subs from the bowler dropdowns as needed.</div>';
   html += '</div>';
 
   container.innerHTML = html;
