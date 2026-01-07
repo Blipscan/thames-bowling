@@ -1951,7 +1951,7 @@ function openMatchForm(matchId) {
 
   html += '</div>'; // End side-by-side grid
 
-  // Points section (condensed to one line)
+  // Points section (condensed to one line - no wrapping)
   const [g1aPtsCalc, g1bPtsCalc] = ptsG1 ? ptsG1.split('/').map(x => parseInt(x) || 0) : [0, 0];
   const [g2aPtsCalc, g2bPtsCalc] = ptsG2 ? ptsG2.split('/').map(x => parseInt(x) || 0) : [0, 0];
   const [sAptsCalc, sBptsCalc] = ptsSeries ? ptsSeries.split('/').map(x => parseInt(x) || 0) : [0, 0];
@@ -1959,25 +1959,19 @@ function openMatchForm(matchId) {
   const totalPtsB = g1bPtsCalc + g2bPtsCalc + sBptsCalc;
   
   html += '<div style="background:#111827;border:1px solid #1f2937;border-radius:0.5rem;padding:0.75rem;margin-top:1rem;">';
-  html += '<div style="display:flex;align-items:center;gap:0.75rem;flex-wrap:wrap;">';
-  html += '<div class="small" style="font-weight:600;">Points:</div>';
-  html += '<div style="display:flex;align-items:center;gap:0.5rem;">';
-  html += '<label class="small muted">G1</label>';
-  html += '<input type="text" name="ptsG1" value="' + ptsG1 + '" placeholder="A/B" style="width:50px;text-align:center;">';
-  html += '</div>';
-  html += '<div style="display:flex;align-items:center;gap:0.5rem;">';
-  html += '<label class="small muted">G2</label>';
-  html += '<input type="text" name="ptsG2" value="' + ptsG2 + '" placeholder="A/B" style="width:50px;text-align:center;">';
-  html += '</div>';
-  html += '<div style="display:flex;align-items:center;gap:0.5rem;">';
-  html += '<label class="small muted">Series</label>';
-  html += '<input type="text" name="ptsSeries" value="' + ptsSeries + '" placeholder="A/B" style="width:50px;text-align:center;">';
-  html += '</div>';
-  html += '<div class="small muted">|</div>';
-  html += '<div class="small" style="font-weight:600;">Total:</div>';
-  html += '<div class="small" style="color:#93c5fd;"><strong>' + totalPtsA + '</strong></div>';
-  html += '<div class="small muted">-</div>';
-  html += '<div class="small" style="color:#6ee7b7;"><strong>' + totalPtsB + '</strong></div>';
+  html += '<div style="display:flex;align-items:center;gap:0.5rem;flex-wrap:nowrap;white-space:nowrap;">';
+  html += '<div class="small" style="font-weight:600;flex-shrink:0;">Points:</div>';
+  html += '<label class="small muted" style="flex-shrink:0;">G1</label>';
+  html += '<input type="text" name="ptsG1" value="' + ptsG1 + '" placeholder="A/B" style="width:50px;text-align:center;flex-shrink:0;">';
+  html += '<label class="small muted" style="flex-shrink:0;">G2</label>';
+  html += '<input type="text" name="ptsG2" value="' + ptsG2 + '" placeholder="A/B" style="width:50px;text-align:center;flex-shrink:0;">';
+  html += '<label class="small muted" style="flex-shrink:0;">Series</label>';
+  html += '<input type="text" name="ptsSeries" value="' + ptsSeries + '" placeholder="A/B" style="width:50px;text-align:center;flex-shrink:0;">';
+  html += '<div class="small muted" style="flex-shrink:0;">|</div>';
+  html += '<div class="small" style="font-weight:600;flex-shrink:0;">Total:</div>';
+  html += '<div class="small" style="color:#93c5fd;flex-shrink:0;"><strong>' + totalPtsA + '</strong></div>';
+  html += '<div class="small muted" style="flex-shrink:0;">-</div>';
+  html += '<div class="small" style="color:#6ee7b7;flex-shrink:0;"><strong>' + totalPtsB + '</strong></div>';
   html += '</div></div>';
 
   // Handicap adjustment section (collapsible/compact)
