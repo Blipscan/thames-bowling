@@ -1649,7 +1649,11 @@ function renderFullSchedule() {
   body.innerHTML = html;
 }
 
+let currentMatchForm = null;
+
 function openMatchForm(matchId) {
+  if (!requireAuth()) return;
+  
   const container = document.getElementById('matchForm');
   if (!container) return;
   
@@ -1659,12 +1663,263 @@ function openMatchForm(matchId) {
     return;
   }
   
-  container.innerHTML = `
-    <p class="small"><strong>${formatDateLabel(match.date)}</strong> - ${leagueLabel(match.league)}</p>
-    <p class="small">Team ${match.homeTeam} vs Team ${match.awayTeam}</p>
-    <p class="small muted mt-2">Match form would appear here with score entry fields.</p>
-    <p class="small muted">This is a simplified demo - full form in complete version.</p>
+  currentMatchForm = match;
+  
+  // Get existing result if any
+  const existingResult = getResultForMatch(match);
+  
+  // Get teams
+  const leagueTeams = match.league === 'mens' ? state.teams.mens : state.teams.doubles;
+  const teamA = leagueTeams.find(t => t.id === match.homeTeam);
+  const teamB = leagueTeams.find(t => t.id === match.awayTeam);
+  
+  if (!teamA || !teamB) {
+    container.innerHTML = '<p class="muted small">Teams not found for this match.</p>';
+    return;
+  }
+  
+  const playersPerTeam = match.league === 'mens' ? 2 : 4;
+  
+  let html = `
+    <div style="margin-bottom:1rem;">
+      <p class="small"><strong>${formatDateLabel(match.date)}</strong> - ${leagueLabel(match.league)}</p>
+      <p class="small">Team ${match.homeTeam} vs Team ${match.awayTeam}</p>
+    </div>
+    
+    <form id="matchResultForm" onsubmit="saveMatchResult(event)">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;">
+        <!-- Team A -->
+        <div>
+          <h4 class="small" style="color:#93c5fd;margin-bottom:0.5rem;">Team ${match.homeTeam}</h4>
+          ${teamA.players.slice(0, playersPerTeam).map((pid, idx) => {
+            const player = getPlayerById(pid);
+            const existingBowler = existingResult?.bowlers?.find(b => b.playerId === pid && b.teamId === match.homeTeam);
+            return `
+              <div class="form-row" style="margin-bottom:0.5rem;">
+                <label style="min-width:100px;">${player ? player.name : pid}:</label>
+                <input type="number" name="teamA_player${idx}_g1" placeholder="G1" value="${existingBowler?.scores?.[0] || ''}" style="width:60px;" min="0" max="300">
+                <input type="number" name="teamA_player${idx}_g2" placeholder="G2" value="${existingBowler?.scores?.[1] || ''}" style="width:60px;" min="0" max="300">
+                <input type="hidden" name="teamA_player${idx}_id" value="${pid}">
+              </div>
+            `;
+          }).join('')}
+          ${teamA.players.length < playersPerTeam ? `<p class="small muted">Need ${playersPerTeam - teamA.players.length} more player(s)</p>` : ''}
+        </div>
+        
+        <!-- Team B -->
+        <div>
+          <h4 class="small" style="color:#6ee7b7;margin-bottom:0.5rem;">Team ${match.awayTeam}</h4>
+          ${teamB.players.slice(0, playersPerTeam).map((pid, idx) => {
+            const player = getPlayerById(pid);
+            const existingBowler = existingResult?.bowlers?.find(b => b.playerId === pid && b.teamId === match.awayTeam);
+            return `
+              <div class="form-row" style="margin-bottom:0.5rem;">
+                <label style="min-width:100px;">${player ? player.name : pid}:</label>
+                <input type="number" name="teamB_player${idx}_g1" placeholder="G1" value="${existingBowler?.scores?.[0] || ''}" style="width:60px;" min="0" max="300">
+                <input type="number" name="teamB_player${idx}_g2" placeholder="G2" value="${existingBowler?.scores?.[1] || ''}" style="width:60px;" min="0" max="300">
+                <input type="hidden" name="teamB_player${idx}_id" value="${pid}">
+              </div>
+            `;
+          }).join('')}
+          ${teamB.players.length < playersPerTeam ? `<p class="small muted">Need ${playersPerTeam - teamB.players.length} more player(s)</p>` : ''}
+        </div>
+      </div>
+      
+      <div style="margin-top:1rem;padding-top:1rem;border-top:1px solid #1f2937;">
+        <div id="matchTotals" class="small" style="margin-bottom:1rem;">
+          <strong>Totals:</strong> Calculating...
+        </div>
+        <div style="display:flex;gap:0.5rem;">
+          <button type="submit" class="btn">Save Result</button>
+          ${existingResult ? '<button type="button" class="btn btn-secondary" onclick="deleteMatchResult()">Delete Result</button>' : ''}
+        </div>
+      </div>
+    </form>
   `;
+  
+  container.innerHTML = html;
+  
+  // Add event listeners to calculate totals as scores are entered
+  const inputs = container.querySelectorAll('input[type="number"]');
+  inputs.forEach(input => {
+    input.addEventListener('input', calculateMatchTotals);
+  });
+  
+  // Calculate initial totals
+  calculateMatchTotals();
+}
+
+function calculateMatchTotals() {
+  const container = document.getElementById('matchForm');
+  if (!container || !currentMatchForm) return;
+  
+  const form = container.querySelector('#matchResultForm');
+  if (!form) return;
+  
+  const totalsEl = document.getElementById('matchTotals');
+  if (!totalsEl) return;
+  
+  const playersPerTeam = currentMatchForm.league === 'mens' ? 2 : 4;
+  
+  // Calculate Team A totals
+  let teamAG1 = 0, teamAG2 = 0;
+  for (let i = 0; i < playersPerTeam; i++) {
+    const g1 = parseInt(form.querySelector(`input[name="teamA_player${i}_g1"]`)?.value || 0) || 0;
+    const g2 = parseInt(form.querySelector(`input[name="teamA_player${i}_g2"]`)?.value || 0) || 0;
+    teamAG1 += g1;
+    teamAG2 += g2;
+  }
+  
+  // Calculate Team B totals
+  let teamBG1 = 0, teamBG2 = 0;
+  for (let i = 0; i < playersPerTeam; i++) {
+    const g1 = parseInt(form.querySelector(`input[name="teamB_player${i}_g1"]`)?.value || 0) || 0;
+    const g2 = parseInt(form.querySelector(`input[name="teamB_player${i}_g2"]`)?.value || 0) || 0;
+    teamBG1 += g1;
+    teamBG2 += g2;
+  }
+  
+  // Calculate points
+  const g1APts = teamAG1 > teamBG1 ? 1 : (teamAG1 < teamBG1 ? 0 : 0);
+  const g1BPts = teamBG1 > teamAG1 ? 1 : (teamBG1 < teamAG1 ? 0 : 0);
+  const g2APts = teamAG2 > teamBG2 ? 1 : (teamAG2 < teamBG2 ? 0 : 0);
+  const g2BPts = teamBG2 > teamAG2 ? 1 : (teamBG2 < teamAG2 ? 0 : 0);
+  
+  const seriesA = teamAG1 + teamAG2;
+  const seriesB = teamBG1 + teamBG2;
+  const seriesAPts = seriesA > seriesB ? 1 : (seriesA < seriesB ? 0 : 0);
+  const seriesBPts = seriesB > seriesA ? 1 : (seriesB < seriesA ? 0 : 0);
+  
+  const totalPtsA = g1APts + g2APts + seriesAPts;
+  const totalPtsB = g1BPts + g2BPts + seriesBPts;
+  
+  totalsEl.innerHTML = `
+    <strong>Game 1:</strong> ${teamAG1} - ${teamBG1} (${g1APts}-${g1BPts} pts)<br>
+    <strong>Game 2:</strong> ${teamAG2} - ${teamBG2} (${g2APts}-${g2BPts} pts)<br>
+    <strong>Series:</strong> ${seriesA} - ${seriesB} (${seriesAPts}-${seriesBPts} pts)<br>
+    <strong>Total Points:</strong> ${totalPtsA} - ${totalPtsB}
+  `;
+}
+
+async function saveMatchResult(event) {
+  event.preventDefault();
+  if (!requireAuth()) return;
+  if (!currentMatchForm) return;
+  
+  const form = event.target;
+  const playersPerTeam = currentMatchForm.league === 'mens' ? 2 : 4;
+  
+  // Collect Team A scores
+  const teamABowlers = [];
+  for (let i = 0; i < playersPerTeam; i++) {
+    const playerId = form.querySelector(`input[name="teamA_player${i}_id"]`)?.value;
+    const g1 = parseInt(form.querySelector(`input[name="teamA_player${i}_g1"]`)?.value || 0) || 0;
+    const g2 = parseInt(form.querySelector(`input[name="teamA_player${i}_g2"]`)?.value || 0) || 0;
+    if (playerId && (g1 > 0 || g2 > 0)) {
+      teamABowlers.push({
+        playerId: playerId,
+        league: currentMatchForm.league,
+        teamId: currentMatchForm.homeTeam,
+        scores: [g1, g2],
+        isSub: false
+      });
+    }
+  }
+  
+  // Collect Team B scores
+  const teamBBowlers = [];
+  for (let i = 0; i < playersPerTeam; i++) {
+    const playerId = form.querySelector(`input[name="teamB_player${i}_id"]`)?.value;
+    const g1 = parseInt(form.querySelector(`input[name="teamB_player${i}_g1"]`)?.value || 0) || 0;
+    const g2 = parseInt(form.querySelector(`input[name="teamB_player${i}_g2"]`)?.value || 0) || 0;
+    if (playerId && (g1 > 0 || g2 > 0)) {
+      teamBBowlers.push({
+        playerId: playerId,
+        league: currentMatchForm.league,
+        teamId: currentMatchForm.awayTeam,
+        scores: [g1, g2],
+        isSub: false
+      });
+    }
+  }
+  
+  // Calculate totals
+  const teamAG1 = teamABowlers.reduce((sum, b) => sum + (b.scores[0] || 0), 0);
+  const teamAG2 = teamABowlers.reduce((sum, b) => sum + (b.scores[1] || 0), 0);
+  const teamBG1 = teamBBowlers.reduce((sum, b) => sum + (b.scores[0] || 0), 0);
+  const teamBG2 = teamBBowlers.reduce((sum, b) => sum + (b.scores[1] || 0), 0);
+  
+  // Calculate points
+  const g1APts = teamAG1 > teamBG1 ? 1 : 0;
+  const g1BPts = teamBG1 > teamAG1 ? 1 : 0;
+  const g2APts = teamAG2 > teamBG2 ? 1 : 0;
+  const g2BPts = teamBG2 > teamAG2 ? 1 : 0;
+  const seriesA = teamAG1 + teamAG2;
+  const seriesB = teamBG1 + teamBG2;
+  const seriesAPts = seriesA > seriesB ? 1 : 0;
+  const seriesBPts = seriesB > seriesA ? 1 : 0;
+  
+  // Create result object
+  const result = {
+    id: `res_${currentMatchForm.date}-${currentMatchForm.league === 'mens' ? 'm' : 'd'}-${currentMatchForm.homeTeam}v${currentMatchForm.awayTeam}`,
+    league: currentMatchForm.league,
+    date: currentMatchForm.date,
+    teamA: currentMatchForm.homeTeam,
+    teamB: currentMatchForm.awayTeam,
+    games: [
+      { aTotal: teamAG1, bTotal: teamBG1, aPoints: g1APts, bPoints: g1BPts },
+      { aTotal: teamAG2, bTotal: teamBG2, aPoints: g2APts, bPoints: g2BPts }
+    ],
+    seriesPointsA: seriesAPts,
+    seriesPointsB: seriesBPts,
+    bowlers: [...teamABowlers, ...teamBBowlers]
+  };
+  
+  // Remove existing result if any
+  const existingIndex = state.results.findIndex(r => 
+    r.league === result.league &&
+    r.date === result.date &&
+    r.teamA === result.teamA &&
+    r.teamB === result.teamB
+  );
+  
+  if (existingIndex >= 0) {
+    state.results[existingIndex] = result;
+  } else {
+    state.results.push(result);
+  }
+  
+  // Save to cloud
+  await saveToCloud();
+  
+  // Refresh displays
+  renderAll();
+  
+  showToast('✅ Match result saved!');
+  
+  // Re-open the form to show updated data
+  openMatchForm(currentMatchForm.id);
+}
+
+async function deleteMatchResult() {
+  if (!requireAuth()) return;
+  if (!currentMatchForm) return;
+  if (!confirm('Delete this match result?')) return;
+  
+  const index = state.results.findIndex(r =>
+    r.league === currentMatchForm.league &&
+    r.date === currentMatchForm.date &&
+    r.teamA === currentMatchForm.homeTeam &&
+    r.teamB === currentMatchForm.awayTeam
+  );
+  
+  if (index >= 0) {
+    state.results.splice(index, 1);
+    await saveToCloud();
+    renderAll();
+    showToast('Result deleted');
+    openMatchForm(currentMatchForm.id);
+  }
 }
 
 function renderAll() {
@@ -1757,6 +2012,9 @@ window.attemptLogin = attemptLogin;
 window.viewOnlyMode = viewOnlyMode;
 window.setActiveTab = setActiveTab;
 window.showPlayerDetail = showPlayerDetail;
+window.saveMatchResult = saveMatchResult;
+window.deleteMatchResult = deleteMatchResult;
+window.calculateMatchTotals = calculateMatchTotals;
 
 // Start
 window.addEventListener('DOMContentLoaded', init);
