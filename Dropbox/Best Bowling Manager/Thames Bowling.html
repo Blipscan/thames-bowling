@@ -482,6 +482,7 @@ input[type="checkbox"] {
   color: #bbf7d0;
 }
   </style>
+  <!-- Supabase will be loaded dynamically -->
 </head>
 <body>
   <!-- Loading overlay -->
@@ -875,13 +876,15 @@ const MANAGER_PASSWORD = 'duckpin2025';
 // SUPABASE DATA LAYER
 // ===========================================
 async function initSupabase() {
-  // Load Supabase from CDN
-  if (typeof window.supabase === 'undefined') {
-    await loadScript('https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2');
+  // Load Supabase using ES modules (most reliable method)
+  try {
+    const { createClient } = await import('https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm');
+    supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    return supabase;
+  } catch (err) {
+    console.error('Failed to load Supabase:', err);
+    throw new Error('Supabase library failed to load. Please check your internet connection and refresh the page.');
   }
-  
-  supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-  return supabase;
 }
 
 function loadScript(src) {
