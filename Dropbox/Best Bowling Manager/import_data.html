@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Import Data to Supabase - Thames Bowling</title>
+  <style>
+    body {
+      font-family: system-ui, sans-serif;
+      max-width: 600px;
+      margin: 2rem auto;
+      padding: 1rem;
+      background: #0b1120;
+      color: #e5e7eb;
+    }
+    .container {
+      background: #020617;
+      border: 1px solid #1e293b;
+      border-radius: 0.75rem;
+      padding: 2rem;
+    }
+    h1 {
+      color: #f97316;
+      margin-top: 0;
+    }
+    input, button {
+      width: 100%;
+      padding: 0.75rem;
+      margin: 0.5rem 0;
+      border-radius: 0.5rem;
+      border: 1px solid #1f2937;
+      background: #020617;
+      color: #e5e7eb;
+      font-size: 1rem;
+    }
+    button {
+      background: #f97316;
+      color: #111827;
+      font-weight: 600;
+      cursor: pointer;
+      border: none;
+    }
+    button:hover {
+      background: #ea580c;
+    }
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    .status {
+      margin-top: 1rem;
+      padding: 1rem;
+      border-radius: 0.5rem;
+      display: none;
+    }
+    .status.success {
+      background: rgba(16, 185, 129, 0.15);
+      color: #6ee7b7;
+      display: block;
+    }
+    .status.error {
+      background: rgba(239, 68, 68, 0.15);
+      color: #fca5a5;
+      display: block;
+    }
+    .status.info {
+      background: rgba(59, 130, 246, 0.15);
+      color: #93c5fd;
+      display: block;
+    }
+    label {
+      display: block;
+      margin-top: 1rem;
+      color: #9ca3af;
+      font-size: 0.9rem;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Import Data to Supabase</h1>
+    <p style="color: #9ca3af;">This will import your JSON data into Supabase for the Thames Bowling Manager app.</p>
+    
+    <label>Supabase URL:</label>
+    <input type="text" id="supabaseUrl" placeholder="https://your-project.supabase.co" value="https://fmyxielzsopklgfoiqlf.supabase.co">
+    
+    <label>Supabase Anon Key:</label>
+    <input type="text" id="supabaseKey" placeholder="your-anon-key" value="sb_publishable_MFEQevzyXTUpOXQGcVZfww_PPLX7dZ_">
+    
+    <label>JSON Data File:</label>
+    <input type="file" id="jsonFile" accept=".json">
+    
+    <button id="importBtn" onclick="importData()">Import to Supabase</button>
+    
+    <div id="status" class="status"></div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script>
+    let supabase = null;
+
+    async function importData() {
+      const url = document.getElementById('supabaseUrl').value.trim();
+      const key = document.getElementById('supabaseKey').value.trim();
+      const fileInput = document.getElementById('jsonFile');
+      const statusEl = document.getElementById('status');
+      const importBtn = document.getElementById('importBtn');
+
+      // Validate inputs
+      if (!url || !key) {
+        showStatus('error', 'Please enter Supabase URL and Anon Key');
+        return;
+      }
+
+      if (!fileInput.files || !fileInput.files[0]) {
+        showStatus('error', 'Please select a JSON file');
+        return;
+      }
+
+      // Initialize Supabase
+      try {
+        supabase = window.supabase.createClient(url, key);
+      } catch (err) {
+        showStatus('error', 'Failed to initialize Supabase: ' + err.message);
+        return;
+      }
+
+      // Read JSON file
+      const file = fileInput.files[0];
+      const reader = new FileReader();
+      
+      reader.onload = async (e) => {
+        try {
+          importBtn.disabled = true;
+          showStatus('info', 'Reading JSON file...');
+
+          const jsonData = JSON.parse(e.target.result);
+          
+          // Validate structure
+          if (!jsonData.players || !jsonData.teams || !jsonData.schedule || !jsonData.results) {
+            throw new Error('Invalid JSON structure. Expected: players, teams, schedule, results');
+          }
+
+          showStatus('info', 'Uploading to Supabase...');
+
+          // Prepare payload
+          const payload = {
+            league_id: 'thames_2025',
+            data: {
+              players: jsonData.players || [],
+              teams: jsonData.teams || { mens: [], doubles: [] },
+              schedule: jsonData.schedule || [],
+              results: jsonData.results || []
+            },
+            updated_at: new Date().toISOString()
+          };
+
+          // Upload to Supabase
+          const { data, error } = await supabase
+            .from('league_data')
+            .upsert(payload, { onConflict: 'league_id' });
+
+          if (error) {
+            throw error;
+          }
+
+          showStatus('success', `✅ Successfully imported data!<br><br>
+            Players: ${jsonData.players.length}<br>
+            Men's Teams: ${jsonData.teams.mens.length}<br>
+            Doubles Teams: ${jsonData.teams.doubles.length}<br>
+            Schedule Items: ${jsonData.schedule.length}<br>
+            Results: ${jsonData.results.length}<br><br>
+            Your app should now show this data when you refresh it.`);
+
+          importBtn.disabled = false;
+
+        } catch (err) {
+          showStatus('error', 'Import failed: ' + err.message);
+          importBtn.disabled = false;
+          console.error('Import error:', err);
+        }
+      };
+
+      reader.onerror = () => {
+        showStatus('error', 'Failed to read file');
+        importBtn.disabled = false;
+      };
+
+      reader.readAsText(file);
+    }
+
+    function showStatus(type, message) {
+      const statusEl = document.getElementById('status');
+      statusEl.className = 'status ' + type;
+      statusEl.innerHTML = message;
+    }
+
+    // Auto-load the JSON file if it exists in the same directory
+    window.addEventListener('DOMContentLoaded', () => {
+      // Try to load thames_duckpin_data.json if available
+      fetch('thames_duckpin_data.json')
+        .then(res => res.ok ? res.json() : null)
+        .then(data => {
+          if (data) {
+            // Create a File object from the JSON
+            const jsonStr = JSON.stringify(data, null, 2);
+            const blob = new Blob([jsonStr], { type: 'application/json' });
+            const file = new File([blob], 'thames_duckpin_data.json', { type: 'application/json' });
+            
+            // Create a DataTransfer to set the file input
+            const dataTransfer = new DataTransfer();
+            dataTransfer.items.add(file);
+            document.getElementById('jsonFile').files = dataTransfer.files;
+            
+            showStatus('info', '✅ Loaded thames_duckpin_data.json automatically. Click "Import to Supabase" to upload.');
+          }
+        })
+        .catch(() => {
+          // File doesn't exist, that's okay
+        });
+    });
+  </script>
+</body>
+</html>
