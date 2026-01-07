@@ -4,115 +4,159 @@
   <meta charset="UTF-8" />
   <title>Thames Club Duckpin Manager – Cloud Edition</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+  <!-- ✅ CORRECT Supabase UMD build -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+
   <style>
-    body{margin:0;font-family:system-ui,-apple-system,BlinkMacSystemFont,"Inter",sans-serif;background:#0b1120;color:#e5e7eb}
-    .loading-overlay{position:fixed;inset:0;background:#0b1120;display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:200}
-    .loading-spinner{width:40px;height:40px;border:3px solid #1f2937;border-top-color:#f97316;border-radius:50%;animation:spin 1s linear infinite}
+    body{
+      margin:0;
+      font-family:system-ui,-apple-system,BlinkMacSystemFont,"Inter",sans-serif;
+      background:#0b1120;
+      color:#e5e7eb
+    }
+    .loading-overlay{
+      position:fixed;inset:0;background:#0b1120;
+      display:flex;flex-direction:column;
+      align-items:center;justify-content:center;
+      z-index:200
+    }
+    .loading-spinner{
+      width:40px;height:40px;
+      border:3px solid #1f2937;
+      border-top-color:#f97316;
+      border-radius:50%;
+      animation:spin 1s linear infinite
+    }
     @keyframes spin{to{transform:rotate(360deg)}}
     .loading-text{margin-top:1rem;color:#9ca3af;font-size:.9rem}
+
     .debug{
       position:fixed;left:12px;bottom:12px;max-width:720px;
-      background:#111827;border:1px solid #374151;border-radius:12px;
-      padding:10px 12px;font-size:12px;color:#e5e7eb;z-index:9999
+      background:#111827;border:1px solid #374151;
+      border-radius:12px;padding:10px 12px;
+      font-size:12px;color:#e5e7eb;z-index:9999
     }
     .debug b{color:#f97316}
     .debug code{color:#a7f3d0}
-    .app-shell{max-width:1100px;margin:0 auto;padding:1.5rem 1rem 3rem}
-    .app-title{font-size:1.2rem;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:#f97316}
+
+    .app-shell{
+      max-width:1100px;margin:0 auto;
+      padding:1.5rem 1rem 3rem
+    }
+    .app-title{
+      font-size:1.2rem;font-weight:800;
+      letter-spacing:.06em;text-transform:uppercase;
+      color:#f97316
+    }
     .muted{color:#9ca3af}
-    .card{background:#020617;border-radius:.75rem;border:1px solid #1e293b;padding:1rem 1.25rem;margin-top:1rem}
+    .card{
+      background:#020617;border-radius:.75rem;
+      border:1px solid #1e293b;
+      padding:1rem 1.25rem;margin-top:1rem
+    }
   </style>
 </head>
+
 <body>
+
+  <!-- Loading overlay -->
   <div id="loadingOverlay" class="loading-overlay">
     <div class="loading-spinner"></div>
-    <div class="loading-text">Loading Thames Club data...</div>
+    <div class="loading-text">Loading Thames Club data…</div>
   </div>
 
+  <!-- Debug panel -->
   <div id="debug" class="debug">
     <b>Status:</b> <span id="dbgStatus">booting…</span><br/>
     <b>Supabase:</b> <span id="dbgSb">not checked</span><br/>
-    <b>Hint:</b> open DevTools → Console for exact error.<br/>
-    <span class="muted">If you see blank screen, your JS is failing before render.</span>
+    <span class="muted">Open DevTools → Console for full error detail.</span>
   </div>
 
-  <div class="app-shell" id="app" style="display:none;">
+  <!-- App shell -->
+  <div id="app" class="app-shell" style="display:none;">
     <div class="app-title">Thames Club Duckpin Manager</div>
-    <div class="muted">If you can see this, the page rendered and JS is running.</div>
+    <div class="muted">If you can see this, JS is running.</div>
 
     <div class="card">
-      <div><b>Next step:</b> connect Supabase + tables/policies.</div>
+      <b>Next step</b>
       <div class="muted" style="margin-top:6px;">
-        This build will show a clear error if Supabase is blocked (missing key / RLS / missing tables).
+        Supabase connectivity + table/RLS validation.
       </div>
     </div>
   </div>
 
-  <script>
+<script>
 'use strict';
 
-(function hardenGlobalErrors(){
+/* ---------- Global error capture ---------- */
+(function(){
   const set = (msg) => {
     const el = document.getElementById('dbgStatus');
     if (el) el.textContent = msg;
   };
+
   window.addEventListener('error', (e) => {
     set('JS error: ' + (e.message || 'unknown'));
-    console.error('Window error:', e.error || e.message, e);
+    console.error('Window error:', e.error || e.message);
   });
+
   window.addEventListener('unhandledrejection', (e) => {
-    set('Promise rejection: ' + (e.reason?.message || String(e.reason)));
+    set('Promise rejection: ' + (e.reason?.message || e.reason));
     console.error('Unhandled rejection:', e.reason);
   });
 })();
 
-// ✅ THESE MUST BE QUOTED STRINGS:
+/* ---------- CONFIG (PASTE FULL KEY) ---------- */
 const SUPABASE_URL = "https://fmyxielzsopklgfoiqlf.supabase.co";
-const SUPABASE_ANON_KEY = "sb_publishable_MFEQevzyXTUpOXQGcVZfww_PPLX7dZ_";
+const SUPABASE_ANON_KEY = "PASTE_THE_FULL_ANON_KEY_HERE";
 
-let supabase = null;
-
+/* ---------- Helpers ---------- */
 function dbg(sb, status){
   document.getElementById('dbgSb').textContent = sb;
   document.getElementById('dbgStatus').textContent = status;
 }
 
+/* ---------- Init ---------- */
 async function init(){
-  // show app shell no matter what, so no “blank”
+  // Always show UI (no blank page)
   document.getElementById('loadingOverlay').style.display = 'none';
   document.getElementById('app').style.display = 'block';
 
   if (!window.supabase?.createClient){
-    dbg('client failed to load', 'Supabase JS library missing (CDN blocked?)');
+    dbg('failed', 'Supabase library did not load (CDN blocked?)');
     return;
   }
 
-  if (!SUPABASE_URL || !SUPABASE_ANON_KEY || SUPABASE_ANON_KEY.includes("PASTE_YOUR_FULL")) {
-    dbg('not configured', 'Set SUPABASE_URL and SUPABASE_ANON_KEY in the file');
+  if (!SUPABASE_URL || !SUPABASE_ANON_KEY || SUPABASE_ANON_KEY.includes("PASTE_")){
+    dbg('not configured', 'Paste full Supabase anon key');
     return;
   }
 
-  supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-  dbg('client ok', 'Trying a simple query…');
+  dbg('client ok', 'Creating client…');
+  const supabase = window.supabase.createClient(
+    SUPABASE_URL,
+    SUPABASE_ANON_KEY
+  );
 
-  // Test query: league_data table must exist, and RLS/policy must allow select
+  dbg('connected', 'Testing query…');
+
   const { data, error } = await supabase
     .from('league_data')
     .select('*')
     .limit(1);
 
   if (error){
-    dbg('query blocked', 'Supabase error: ' + (error.message || JSON.stringify(error)));
-    console.error('Supabase error object:', error);
+    dbg('blocked', 'Supabase error: ' + error.message);
+    console.error('Supabase error:', error);
     return;
   }
 
-  dbg('query ok', 'Supabase reachable. Data rows: ' + (data?.length ?? 0));
+  dbg('ok', 'Query success — rows: ' + (data?.length ?? 0));
 }
 
 document.addEventListener('DOMContentLoaded', init);
-  </script>
+</script>
+
 </body>
 </html>
-
