@@ -482,6 +482,7 @@ input[type="checkbox"] {
   color: #bbf7d0;
 }
   </style>
+  <!-- Supabase will be loaded dynamically -->
 </head>
 <body>
   <!-- Loading overlay -->
@@ -1648,277 +1649,531 @@ function renderFullSchedule() {
   body.innerHTML = html;
 }
 
-let currentMatchForm = null;
+/* AVERAGES / STATS – season-aware */
+function computeLeagueStats(league, opts) {
+  opts = opts || {};
+  const startDate = opts.startDate || null;
+  const endDate = opts.endDate || null;
 
+  const scoresByPlayer = new Map();
+  for (const r of state.results || []) {
+    if (r.league !== league) continue;
+    if (startDate && r.date < startDate) continue;
+    if (endDate && r.date > endDate) continue;
+
+    const bowlers = r.bowlers || [];
+    for (const b of bowlers) {
+      if (b.league !== league) continue;
+      const pid = b.playerId;
+      if (!pid) continue;
+      const arr = scoresByPlayer.get(pid) || [];
+      for (const sc of (b.scores || [])) {
+        if (typeof sc === 'number' && sc > 0) {
+          arr.push(sc);
+        }
+      }
+      scoresByPlayer.set(pid, arr);
+    }
+  }
+
+  const stats = [];
+
+  for (const p of state.players || []) {
+    const startAvg =
+      league === 'mens'
+        ? (typeof p.mensStart === 'number' ? p.mensStart : 0)
+        : (typeof p.doublesStart === 'number' ? p.doublesStart : 0);
+
+    const scores = scoresByPlayer.get(p.id) || [];
+    const n = scores.length;
+
+    if (!startAvg && n === 0) continue;
+
+    let current = startAvg;
+
+    if (n >= 1 && n <= 5) {
+      const s = scores;
+      if (n === 1) current = Math.round((3 * startAvg + s[0]) / 4);
+      if (n === 2) current = Math.round((2 * startAvg + s[0] + s[1]) / 4);
+      if (n === 3) current = Math.round((1 * startAvg + s[0] + s[1] + s[2]) / 4);
+      if (n === 4) current = Math.round((startAvg + s[0] + s[1] + s[2] + s[3]) / 5);
+      if (n === 5) current = Math.round((startAvg + s[0] + s[1] + s[2] + s[3] + s[4]) / 6);
+    } else if (n >= 6) {
+      const total = scores.reduce((a, b) => a + b, 0);
+      current = Math.round(total / n);
+    }
+
+    const name =
+      p.name ||
+      p.displayName ||
+      (p.firstName ? (p.firstName + (p.lastName ? ' ' + p.lastName : '')) : p.id);
+
+    stats.push({
+      playerId: p.id,
+      name,
+      games: n,
+      startingAverage: startAvg,
+      currentAverage: current
+    });
+  }
+
+  return stats;
+}
+
+function teamAvg(league, teamId) {
+  const stats = computeLeagueStats(league);
+  const statsById = new Map(stats.map(s => [s.playerId, s]));
+  const teamsForLeague = state.teams[league] || [];
+  const team = teamsForLeague.find(t => t.id === teamId);
+  if (!team) return null;
+
+  let sum = 0;
+  let count = 0;
+  for (const pid of (team.players || [])) {
+    const info = statsById.get(pid);
+    if (info && typeof info.currentAverage === 'number' && info.currentAverage > 0) {
+      sum += info.currentAverage;
+      count++;
+    }
+  }
+  if (!count) return null;
+  return sum;
+}
+
+/* MATCH FORM – 2 bowlers for Men's, 4 for Doubles + handicap fields */
 function openMatchForm(matchId) {
   if (!requireAuth()) return;
   
+  const match = state.schedule.find(m => m.id === matchId);
   const container = document.getElementById('matchForm');
-  if (!container) return;
+  if (!match || !container) return;
+
+  const isDoubles = (match.league === 'doubles');
+  const slotsPerTeam = isDoubles ? 4 : 2;
+
+  const res = getResultForMatch(match);
+
+  const leaguePlayers = state.players || [];
+  const teamsForLeague = state.teams[match.league] || [];
+  const teamA = teamsForLeague.find(t => t.id === match.homeTeam);
+  const teamB = teamsForLeague.find(t => t.id === match.awayTeam);
+  const rosterA = teamA ? (teamA.players || []) : [];
+  const rosterB = teamB ? (teamB.players || []) : [];
+
+  function playerSelect(name, value, roster) {
+    let html = '<select name="' + name + '">';
+    const idsInOrder = [...roster];
+    const allIds = leaguePlayers.map(p => p.id);
+    const others = allIds.filter(id => !idsInOrder.includes(id));
+    const finalList = idsInOrder.concat(others);
+    for (const id of finalList) {
+      const p = leaguePlayers.find(p => p.id === id);
+      if (!p) continue;
+      const sel = (value === id) ? 'selected' : '';
+      const label = p.displayName || p.name || (p.firstName ? (p.firstName + (p.lastName ? ' ' + p.lastName : '')) : id);
+      html += '<option value="' + id + '" ' + sel + '>' + label + '</option>';
+    }
+    html += '</select>';
+    return html;
+  }
+
+  const bowlersA = new Array(slotsPerTeam).fill('');
+  const scoresA = new Array(slotsPerTeam).fill(null).map(() => [null, null]);
+  const bowlersB = new Array(slotsPerTeam).fill('');
+  const scoresB = new Array(slotsPerTeam).fill(null).map(() => [null, null]);
+
+  for (let i = 0; i < slotsPerTeam; i++) {
+    if (rosterA[i]) bowlersA[i] = rosterA[i];
+    if (rosterB[i]) bowlersB[i] = rosterB[i];
+  }
+
+  if (res) {
+    const teamABowlers = (res.bowlers || []).filter(b => b.teamId === match.homeTeam);
+    const teamBBowlers = (res.bowlers || []).filter(b => b.teamId === match.awayTeam);
+
+    for (let i = 0; i < slotsPerTeam; i++) {
+      if (teamABowlers[i]) {
+        bowlersA[i] = teamABowlers[i].playerId;
+        const sc = teamABowlers[i].scores || [];
+        scoresA[i][0] = sc[0] ?? null;
+        scoresA[i][1] = sc[1] ?? null;
+      }
+      if (teamBBowlers[i]) {
+        bowlersB[i] = teamBBowlers[i].playerId;
+        const sc = teamBBowlers[i].scores || [];
+        scoresB[i][0] = sc[0] ?? null;
+        scoresB[i][1] = sc[1] ?? null;
+      }
+    }
+  }
+
+  function totals(scores) {
+    let g1 = 0, g2 = 0;
+    for (const s of scores) {
+      g1 += Number(s[0] || 0);
+      g2 += Number(s[1] || 0);
+    }
+    return [g1, g2];
+  }
+
+  const [totalA1, totalA2] = totals(scoresA);
+  const [totalB1, totalB2] = totals(scoresB);
+
+  let ptsG1 = '', ptsG2 = '', ptsSeries = '';
+  if (res) {
+    const g1 = res.games?.[0];
+    const g2 = res.games?.[1];
+    if (g1) ptsG1 = (g1.aPoints || 0) + '/' + (g1.bPoints || 0);
+    if (g2) ptsG2 = (g2.aPoints || 0) + '/' + (g2.bPoints || 0);
+    ptsSeries = (res.seriesPointsA || 0) + '/' + (res.seriesPointsB || 0);
+  }
+
+  let handicapPins = null;
+  let lowerTeam = '';
+
+  const avgA = teamAvg(match.league, match.homeTeam);
+  const avgB = teamAvg(match.league, match.awayTeam);
+
+  if (avgA != null && avgB != null && avgA !== avgB) {
+    const diffAvg = Math.abs(avgA - avgB);
+    handicapPins = Math.round(diffAvg * 0.8);
+    lowerTeam = avgA < avgB ? 'A' : 'B';
+  }
+
+  if (res) {
+    if (typeof res.handicapPins === 'number') {
+      handicapPins = res.handicapPins;
+    }
+    if (res.lowerTeam === 'A' || res.lowerTeam === 'B') {
+      lowerTeam = res.lowerTeam;
+    }
+  }
+
+  const hpForNet = (typeof handicapPins === 'number' && handicapPins > 0 ? handicapPins : 0);
+  const aGetsHp = (lowerTeam === 'A');
+  const bGetsHp = (lowerTeam === 'B');
+  const g1aNet = totalA1 + (aGetsHp ? hpForNet : 0);
+  const g1bNet = totalB1 + (bGetsHp ? hpForNet : 0);
+  const g2aNet = totalA2 + (aGetsHp ? hpForNet : 0);
+  const g2bNet = totalB2 + (bGetsHp ? hpForNet : 0);
+  const seriesAScratch = totalA1 + totalA2;
+  const seriesBScratch = totalB1 + totalB2;
+  // Series net is based on net game totals (handicap applied each game)
+  const seriesANet = g1aNet + g2aNet;
+  const seriesBNet = g1bNet + g2bNet;
+
+  let html = '';
+  html += '<div class="card-header">';
+  html += '<div><div class="card-title">' + formatDateLabel(match.date) + ' · ' + leagueLabel(match.league) + '</div>';
+  html += '<div class="small muted">Team ' + match.homeTeam + ' vs Team ' + match.awayTeam + '</div></div>';
+  html += '<div class="flex">';
+  html += '<button class="btn btn-sm" type="button" onclick="rescheduleMatch(\'' + match.id + '\')">Reschedule</button>';
+  html += '</div></div>';
+  html += '<div class="small muted mt-1">Tip: choose subs from the bowler dropdowns as needed.</div>';
+
+  html += '<div class="mt-2">';
+  html += '<div class="small" style="font-weight:600">Team ' + match.homeTeam + '</div>';
+  for (let i = 0; i < slotsPerTeam; i++) {
+    const idx = i + 1;
+    const sc = scoresA[i];
+    const g1 = sc[0] ?? '';
+    const g2 = sc[1] ?? '';
+    html += '<div class="form-row"><label>Bowler ' + idx + '</label>' +
+      playerSelect('a' + idx, bowlersA[i], rosterA) +
+      ' G1 <input type="number" name="a' + idx + 'g1" value="' + g1 + '">' +
+      ' G2 <input type="number" name="a' + idx + 'g2" value="' + g2 + '"></div>';
+  }
+
+  html += '<div class="mt-2 small" style="font-weight:600">Team ' + match.awayTeam + '</div>';
+  for (let i = 0; i < slotsPerTeam; i++) {
+    const idx = i + 1;
+    const sc = scoresB[i];
+    const g1 = sc[0] ?? '';
+    const g2 = sc[1] ?? '';
+    html += '<div class="form-row"><label>Bowler ' + idx + '</label>' +
+      playerSelect('b' + idx, bowlersB[i], rosterB) +
+      ' G1 <input type="number" name="b' + idx + 'g1" value="' + g1 + '">' +
+      ' G2 <input type="number" name="b' + idx + 'g2" value="' + g2 + '"></div>';
+  }
+
+  html += '<div class="mt-2">';
+  html += '<div class="form-row"><label>Team Totals</label>';
+  html += '<span class="small">G1 scratch: ' + totalA1 + ' – ' + totalB1 + '</span>';
+  html += '<span class="small" style="margin-left:0.75rem;">G2 scratch: ' + totalA2 + ' – ' + totalB2 + '</span>';
+  html += '</div>';
+  html += '<div class="form-row small muted" style="margin-top:0.15rem;">';
+  html += '<span>Net after handicap: G1 ' + g1aNet + ' – ' + g1bNet + ', G2 ' + g2aNet + ' – ' + g2bNet + ', Series ' + seriesANet + ' – ' + seriesBNet + '.</span>';
+  html += '</div>';
+  html += '<div class="form-row small muted" style="margin-top:0.15rem;">';
+  html += '<span>Handicap ' +
+    (hpForNet
+      ? (hpForNet + ' pins to Team ' + (aGetsHp ? match.homeTeam : (bGetsHp ? match.awayTeam : '?')))
+      : '0 pins') +
+    ' is added to that team in every game. Game and series points are based on net scores after handicap.</span>';
+  html += '</div>';
+
+  html += '<div class="form-row"><label>Points</label>';
+  html += 'G1 <input type="text" name="ptsG1" value="' + ptsG1 + '" placeholder="A/B">';
+  html += ' G2 <input type="text" name="ptsG2" value="' + ptsG2 + '" placeholder="A/B">';
+  html += ' Series <input type="text" name="ptsSeries" value="' + ptsSeries + '" placeholder="A/B">';
+  html += '</div>';
+
+  html += '<div class="form-row small muted" style="margin-top:0.15rem;">';
+  html += '<span>Enter points as A/B. Game and series points are awarded to the team with the higher net score after handicap.</span>';
+  html += '</div>';
+
+  html += '<div class="form-row"><label>Handicap</label>';
+  html += '<input type="number" name="handicapPins" min="0" value="' +
+    (handicapPins !== null && handicapPins !== undefined ? handicapPins : '') + '">';
+  html += '<select name="lowerTeam">';
+  html += '<option value="">Low team</option>';
+  html += '<option value="A"' + (lowerTeam === 'A' ? ' selected' : '') + '>Team ' + match.homeTeam + '</option>';
+  html += '<option value="B"' + (lowerTeam === 'B' ? ' selected' : '') + '>Team ' + match.awayTeam + '</option>';
+  html += '</select>';
+  html += '<span class="small muted">80% of average difference; applied to the low team (same as Monday Packet).</span>';
+  html += '</div>';
+
+  html += '</div>';
+
+  html += '<div class="form-row" style="margin-top:0.6rem;">';
+  html += '<button type="button" class="btn btn-sm" onclick="saveMatchForm(\'' + match.id + '\')">Save Result</button>';
+  html += '<button type="button" class="btn btn-sm btn-secondary" style="margin-left:0.4rem;" onclick="clearMatchForm()">Close</button>';
+  html += '<span class="muted small">Subs are just chosen from the bowler dropdowns.</span>';
+  html += '</div>';
+
+  container.innerHTML = html;
+}
+
+function clearMatchForm() {
+  const container = document.getElementById('matchForm');
+  if (container) {
+    container.innerHTML = '<p class="muted small">Choose a match to enter or edit the result.</p>';
+  }
+}
+
+async function saveMatchForm(matchId) {
+  if (!requireAuth()) return;
   
   const match = state.schedule.find(m => m.id === matchId);
-  if (!match) {
-    container.innerHTML = '<p class="muted small">Match not found.</p>';
-    return;
-  }
-  
-  currentMatchForm = match;
-  
-  // Get existing result if any
-  const existingResult = getResultForMatch(match);
-  
-  // Get teams
-  const leagueTeams = match.league === 'mens' ? state.teams.mens : state.teams.doubles;
-  const teamA = leagueTeams.find(t => t.id === match.homeTeam);
-  const teamB = leagueTeams.find(t => t.id === match.awayTeam);
-  
-  if (!teamA || !teamB) {
-    container.innerHTML = '<p class="muted small">Teams not found for this match.</p>';
-    return;
-  }
-  
-  const playersPerTeam = match.league === 'mens' ? 2 : 4;
-  
-  let html = `
-    <div style="margin-bottom:1rem;">
-      <p class="small"><strong>${formatDateLabel(match.date)}</strong> - ${leagueLabel(match.league)}</p>
-      <p class="small">Team ${match.homeTeam} vs Team ${match.awayTeam}</p>
-    </div>
-    
-    <form id="matchResultForm" onsubmit="saveMatchResult(event)">
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;">
-        <!-- Team A -->
-        <div>
-          <h4 class="small" style="color:#93c5fd;margin-bottom:0.5rem;">Team ${match.homeTeam}</h4>
-          ${teamA.players.slice(0, playersPerTeam).map((pid, idx) => {
-            const player = getPlayerById(pid);
-            const existingBowler = existingResult?.bowlers?.find(b => b.playerId === pid && b.teamId === match.homeTeam);
-            return `
-              <div class="form-row" style="margin-bottom:0.5rem;">
-                <label style="min-width:100px;">${player ? player.name : pid}:</label>
-                <input type="number" name="teamA_player${idx}_g1" placeholder="G1" value="${existingBowler?.scores?.[0] || ''}" style="width:60px;" min="0" max="300">
-                <input type="number" name="teamA_player${idx}_g2" placeholder="G2" value="${existingBowler?.scores?.[1] || ''}" style="width:60px;" min="0" max="300">
-                <input type="hidden" name="teamA_player${idx}_id" value="${pid}">
-              </div>
-            `;
-          }).join('')}
-          ${teamA.players.length < playersPerTeam ? `<p class="small muted">Need ${playersPerTeam - teamA.players.length} more player(s)</p>` : ''}
-        </div>
-        
-        <!-- Team B -->
-        <div>
-          <h4 class="small" style="color:#6ee7b7;margin-bottom:0.5rem;">Team ${match.awayTeam}</h4>
-          ${teamB.players.slice(0, playersPerTeam).map((pid, idx) => {
-            const player = getPlayerById(pid);
-            const existingBowler = existingResult?.bowlers?.find(b => b.playerId === pid && b.teamId === match.awayTeam);
-            return `
-              <div class="form-row" style="margin-bottom:0.5rem;">
-                <label style="min-width:100px;">${player ? player.name : pid}:</label>
-                <input type="number" name="teamB_player${idx}_g1" placeholder="G1" value="${existingBowler?.scores?.[0] || ''}" style="width:60px;" min="0" max="300">
-                <input type="number" name="teamB_player${idx}_g2" placeholder="G2" value="${existingBowler?.scores?.[1] || ''}" style="width:60px;" min="0" max="300">
-                <input type="hidden" name="teamB_player${idx}_id" value="${pid}">
-              </div>
-            `;
-          }).join('')}
-          ${teamB.players.length < playersPerTeam ? `<p class="small muted">Need ${playersPerTeam - teamB.players.length} more player(s)</p>` : ''}
-        </div>
-      </div>
-      
-      <div style="margin-top:1rem;padding-top:1rem;border-top:1px solid #1f2937;">
-        <div id="matchTotals" class="small" style="margin-bottom:1rem;">
-          <strong>Totals:</strong> Calculating...
-        </div>
-        <div style="display:flex;gap:0.5rem;">
-          <button type="submit" class="btn">Save Result</button>
-          ${existingResult ? '<button type="button" class="btn btn-secondary" onclick="deleteMatchResult()">Delete Result</button>' : ''}
-        </div>
-      </div>
-    </form>
-  `;
-  
-  container.innerHTML = html;
-  
-  // Add event listeners to calculate totals as scores are entered
-  const inputs = container.querySelectorAll('input[type="number"]');
-  inputs.forEach(input => {
-    input.addEventListener('input', calculateMatchTotals);
-  });
-  
-  // Calculate initial totals
-  calculateMatchTotals();
-}
-
-function calculateMatchTotals() {
+  if (!match) return;
   const container = document.getElementById('matchForm');
-  if (!container || !currentMatchForm) return;
-  
-  const form = container.querySelector('#matchResultForm');
-  if (!form) return;
-  
-  const totalsEl = document.getElementById('matchTotals');
-  if (!totalsEl) return;
-  
-  const playersPerTeam = currentMatchForm.league === 'mens' ? 2 : 4;
-  
-  // Calculate Team A totals
-  let teamAG1 = 0, teamAG2 = 0;
-  for (let i = 0; i < playersPerTeam; i++) {
-    const g1 = parseInt(form.querySelector(`input[name="teamA_player${i}_g1"]`)?.value || 0) || 0;
-    const g2 = parseInt(form.querySelector(`input[name="teamA_player${i}_g2"]`)?.value || 0) || 0;
-    teamAG1 += g1;
-    teamAG2 += g2;
-  }
-  
-  // Calculate Team B totals
-  let teamBG1 = 0, teamBG2 = 0;
-  for (let i = 0; i < playersPerTeam; i++) {
-    const g1 = parseInt(form.querySelector(`input[name="teamB_player${i}_g1"]`)?.value || 0) || 0;
-    const g2 = parseInt(form.querySelector(`input[name="teamB_player${i}_g2"]`)?.value || 0) || 0;
-    teamBG1 += g1;
-    teamBG2 += g2;
-  }
-  
-  // Calculate points
-  const g1APts = teamAG1 > teamBG1 ? 1 : (teamAG1 < teamBG1 ? 0 : 0);
-  const g1BPts = teamBG1 > teamAG1 ? 1 : (teamBG1 < teamAG1 ? 0 : 0);
-  const g2APts = teamAG2 > teamBG2 ? 1 : (teamAG2 < teamBG2 ? 0 : 0);
-  const g2BPts = teamBG2 > teamAG2 ? 1 : (teamBG2 < teamAG2 ? 0 : 0);
-  
-  const seriesA = teamAG1 + teamAG2;
-  const seriesB = teamBG1 + teamBG2;
-  const seriesAPts = seriesA > seriesB ? 1 : (seriesA < seriesB ? 0 : 0);
-  const seriesBPts = seriesB > seriesA ? 1 : (seriesB < seriesA ? 0 : 0);
-  
-  const totalPtsA = g1APts + g2APts + seriesAPts;
-  const totalPtsB = g1BPts + g2BPts + seriesBPts;
-  
-  totalsEl.innerHTML = `
-    <strong>Game 1:</strong> ${teamAG1} - ${teamBG1} (${g1APts}-${g1BPts} pts)<br>
-    <strong>Game 2:</strong> ${teamAG2} - ${teamBG2} (${g2APts}-${g2BPts} pts)<br>
-    <strong>Series:</strong> ${seriesA} - ${seriesB} (${seriesAPts}-${seriesBPts} pts)<br>
-    <strong>Total Points:</strong> ${totalPtsA} - ${totalPtsB}
-  `;
-}
+  if (!container) return;
 
-async function saveMatchResult(event) {
-  event.preventDefault();
-  if (!requireAuth()) return;
-  if (!currentMatchForm) return;
-  
-  const form = event.target;
-  const playersPerTeam = currentMatchForm.league === 'mens' ? 2 : 4;
-  
-  // Collect Team A scores
-  const teamABowlers = [];
-  for (let i = 0; i < playersPerTeam; i++) {
-    const playerId = form.querySelector(`input[name="teamA_player${i}_id"]`)?.value;
-    const g1 = parseInt(form.querySelector(`input[name="teamA_player${i}_g1"]`)?.value || 0) || 0;
-    const g2 = parseInt(form.querySelector(`input[name="teamA_player${i}_g2"]`)?.value || 0) || 0;
-    if (playerId && (g1 > 0 || g2 > 0)) {
-      teamABowlers.push({
-        playerId: playerId,
-        league: currentMatchForm.league,
-        teamId: currentMatchForm.homeTeam,
+  const isDoubles = (match.league === 'doubles');
+  const slotsPerTeam = isDoubles ? 4 : 2;
+  const get = name => container.querySelector('[name="' + name + '"]');
+
+  function parsePoints(text) {
+    if (!text) return [0, 0];
+    const parts = String(text).split('/');
+    const a = parseInt(parts[0] || '0', 10);
+    const b = parseInt(parts[1] || '0', 10);
+    return [(isNaN(a) ? 0 : a), (isNaN(b) ? 0 : b)];
+  }
+
+  const bowlers = [];
+  let g1aTot = 0, g2aTot = 0, g1bTot = 0, g2bTot = 0;
+
+  function readSide(prefix, teamId) {
+    for (let i = 1; i <= slotsPerTeam; i++) {
+      const pid = get(prefix + i)?.value || '';
+      const g1 = parseInt(get(prefix + i + 'g1')?.value || '0', 10) || 0;
+      const g2 = parseInt(get(prefix + i + 'g2')?.value || '0', 10) || 0;
+
+      if (prefix === 'a') {
+        g1aTot += g1;
+        g2aTot += g2;
+      } else {
+        g1bTot += g1;
+        g2bTot += g2;
+      }
+
+      if (!pid && !g1 && !g2) continue;
+
+      bowlers.push({
+        playerId: pid,
+        league: match.league,
+        teamId,
         scores: [g1, g2],
         isSub: false
       });
     }
   }
-  
-  // Collect Team B scores
-  const teamBBowlers = [];
-  for (let i = 0; i < playersPerTeam; i++) {
-    const playerId = form.querySelector(`input[name="teamB_player${i}_id"]`)?.value;
-    const g1 = parseInt(form.querySelector(`input[name="teamB_player${i}_g1"]`)?.value || 0) || 0;
-    const g2 = parseInt(form.querySelector(`input[name="teamB_player${i}_g2"]`)?.value || 0) || 0;
-    if (playerId && (g1 > 0 || g2 > 0)) {
-      teamBBowlers.push({
-        playerId: playerId,
-        league: currentMatchForm.league,
-        teamId: currentMatchForm.awayTeam,
-        scores: [g1, g2],
-        isSub: false
-      });
+
+  readSide('a', match.homeTeam);
+  readSide('b', match.awayTeam);
+
+  const [g1aPts, g1bPts] = parsePoints(get('ptsG1')?.value || '');
+  const [g2aPts, g2bPts] = parsePoints(get('ptsG2')?.value || '');
+  const [sApts, sBpts] = parsePoints(get('ptsSeries')?.value || '');
+
+  // Auto-calculate match handicap from the actual lineup when Save is pressed.
+  // We use the league's rolling-average logic up to this match date.
+  let handicapPins = 0;
+  let lowerTeam = '';
+
+  try {
+    const stats = computeLeagueStats(match.league, { endDate: match.date }) || [];
+    const avgByPlayer = new Map();
+    for (const s of stats) {
+      if (s && s.playerId) {
+        const pid = s.playerId;
+        let avg = (typeof s.currentAverage === 'number' ? s.currentAverage : 0);
+        // Special case: Bill Richmond men's league sub should use league sub average 81, not his early raw scores.
+        if (pid === 'billR' && match.league === 'mens') {
+          avg = 81;
+        }
+        avgByPlayer.set(pid, avg);
+      }
     }
+
+    let sumA = 0, sumB = 0;
+    const seenA = new Set();
+    const seenB = new Set();
+
+    for (const b of bowlers) {
+      const pid = b.playerId;
+      if (!pid) continue;
+      const avg = avgByPlayer.get(pid);
+      if (typeof avg !== 'number' || avg <= 0) continue;
+
+      if (b.teamId === match.homeTeam) {
+        if (!seenA.has(pid)) {
+          sumA += avg;
+          seenA.add(pid);
+        }
+      } else if (b.teamId === match.awayTeam) {
+        if (!seenB.has(pid)) {
+          sumB += avg;
+          seenB.add(pid);
+        }
+      }
+    }
+
+    if (sumA > 0 && sumB > 0 && sumA !== sumB) {
+      const diff = Math.abs(sumA - sumB);
+      handicapPins = Math.round(diff * 0.8);
+      lowerTeam = (sumA < sumB) ? 'A' : 'B';
+    }
+
+    const hpField = get('handicapPins');
+    if (hpField) {
+      hpField.value = String(handicapPins);
+    }
+    const lowerTeamField = get('lowerTeam');
+    if (lowerTeamField) {
+      lowerTeamField.value = lowerTeam;
+    }
+  } catch (e) {
+    console.error('Error auto-calculating handicap from lineup', e);
   }
-  
-  // Calculate totals
-  const teamAG1 = teamABowlers.reduce((sum, b) => sum + (b.scores[0] || 0), 0);
-  const teamAG2 = teamABowlers.reduce((sum, b) => sum + (b.scores[1] || 0), 0);
-  const teamBG1 = teamBBowlers.reduce((sum, b) => sum + (b.scores[0] || 0), 0);
-  const teamBG2 = teamBBowlers.reduce((sum, b) => sum + (b.scores[1] || 0), 0);
-  
-  // Calculate points
-  const g1APts = teamAG1 > teamBG1 ? 1 : 0;
-  const g1BPts = teamBG1 > teamAG1 ? 1 : 0;
-  const g2APts = teamAG2 > teamBG2 ? 1 : 0;
-  const g2BPts = teamBG2 > teamAG2 ? 1 : 0;
-  const seriesA = teamAG1 + teamAG2;
-  const seriesB = teamBG1 + teamBG2;
-  const seriesAPts = seriesA > seriesB ? 1 : 0;
-  const seriesBPts = seriesB > seriesA ? 1 : 0;
-  
-  // Create result object
-  const result = {
-    id: `res_${currentMatchForm.date}-${currentMatchForm.league === 'mens' ? 'm' : 'd'}-${currentMatchForm.homeTeam}v${currentMatchForm.awayTeam}`,
-    league: currentMatchForm.league,
-    date: currentMatchForm.date,
-    teamA: currentMatchForm.homeTeam,
-    teamB: currentMatchForm.awayTeam,
-    games: [
-      { aTotal: teamAG1, bTotal: teamBG1, aPoints: g1APts, bPoints: g1BPts },
-      { aTotal: teamAG2, bTotal: teamBG2, aPoints: g2APts, bPoints: g2BPts }
-    ],
-    seriesPointsA: seriesAPts,
-    seriesPointsB: seriesBPts,
-    bowlers: [...teamABowlers, ...teamBBowlers]
-  };
-  
-  // Remove existing result if any
-  const existingIndex = state.results.findIndex(r => 
-    r.league === result.league &&
-    r.date === result.date &&
-    r.teamA === result.teamA &&
-    r.teamB === result.teamB
+
+  // Get final handicap values from form (user may have overridden)
+  const finalHp = parseInt(get('handicapPins')?.value || '0', 10) || 0;
+  const finalLowerTeam = get('lowerTeam')?.value || '';
+
+  const existingIndex = state.results.findIndex(r =>
+    r.league === match.league &&
+    r.date === match.date &&
+    r.teamA === match.homeTeam &&
+    r.teamB === match.awayTeam
   );
-  
+
   if (existingIndex >= 0) {
-    state.results[existingIndex] = result;
-  } else {
-    state.results.push(result);
+    const pwd = prompt('Manager password required to change a completed match. Enter password or leave blank to cancel:');
+    if (!pwd) {
+      showToast('Cancelled – existing result left unchanged');
+      return;
+    }
+    if (pwd !== MANAGER_PASSWORD) {
+      alert('Incorrect password. No changes were made.');
+      return;
+    }
   }
-  
+
+  const resultObj = {
+    id: 'res_' + match.id,
+    league: match.league,
+    date: match.date,
+    teamA: match.homeTeam,
+    teamB: match.awayTeam,
+    games: [
+      { aTotal: g1aTot, bTotal: g1bTot, aPoints: g1aPts, bPoints: g1bPts },
+      { aTotal: g2aTot, bTotal: g2bTot, aPoints: g2aPts, bPoints: g2bPts }
+    ],
+    seriesPointsA: sApts,
+    seriesPointsB: sBpts,
+    bowlers,
+    handicapPins: finalHp,
+    lowerTeam: finalLowerTeam
+  };
+
+  if (existingIndex >= 0) {
+    state.results[existingIndex] = resultObj;
+  } else {
+    state.results.push(resultObj);
+  }
+
   // Save to cloud
   await saveToCloud();
-  
+
   // Refresh displays
   renderAll();
-  
-  showToast('✅ Match result saved!');
-  
-  // Re-open the form to show updated data
-  openMatchForm(currentMatchForm.id);
+  showToast('Result saved');
 }
 
-async function deleteMatchResult() {
-  if (!requireAuth()) return;
-  if (!currentMatchForm) return;
-  if (!confirm('Delete this match result?')) return;
-  
-  const index = state.results.findIndex(r =>
-    r.league === currentMatchForm.league &&
-    r.date === currentMatchForm.date &&
-    r.teamA === currentMatchForm.homeTeam &&
-    r.teamB === currentMatchForm.awayTeam
-  );
-  
-  if (index >= 0) {
-    state.results.splice(index, 1);
-    await saveToCloud();
-    renderAll();
-    showToast('Result deleted');
-    openMatchForm(currentMatchForm.id);
+function rescheduleMatch(matchId) {
+  const match = state.schedule.find(m => m.id === matchId);
+  if (!match) return;
+
+  const oldDate = match.date;
+
+  const newDate = prompt('Enter new date (YYYY-MM-DD):', match.date);
+  if (!newDate) return;
+  const okFormat = /^\d{4}-\d{2}-\d{2}$/.test(newDate);
+  if (!okFormat) {
+    alert('Please use YYYY-MM-DD format.');
+    return;
   }
+  const confirmChange = confirm('Reschedule this match to ' + newDate + '?');
+  if (!confirmChange) return;
+
+  const newId = newDate + '-' + (match.league === 'mens' ? 'm' : 'd') +
+    '-' + match.homeTeam + 'v' + match.awayTeam;
+
+  // Update the schedule entry
+  match.date = newDate;
+  match.rescheduled = true;
+  match.id = newId;
+
+  // Update any saved results that belong to this match
+  for (const r of state.results) {
+    if (
+      r.league === match.league &&
+      r.date === oldDate &&
+      r.teamA === match.homeTeam &&
+      r.teamB === match.awayTeam
+    ) {
+      r.date = newDate;
+      if (r.id && r.id.indexOf('res_') === 0) {
+        r.id = 'res_' + newId;
+      }
+    }
+  }
+
+  // Keep schedule sorted by date
+  state.schedule.sort((a, b) => (a.date > b.date ? 1 : -1));
+
+  // Save to cloud
+  saveToCloud();
+
+  // Refresh all views that depend on this match
+  renderAll();
+
+  // Refresh the open match form so the header shows the new date
+  openMatchForm(match.id);
+
+  showToast('Match rescheduled');
 }
 
 function renderAll() {
@@ -2011,9 +2266,9 @@ window.attemptLogin = attemptLogin;
 window.viewOnlyMode = viewOnlyMode;
 window.setActiveTab = setActiveTab;
 window.showPlayerDetail = showPlayerDetail;
-window.saveMatchResult = saveMatchResult;
-window.deleteMatchResult = deleteMatchResult;
-window.calculateMatchTotals = calculateMatchTotals;
+window.saveMatchForm = saveMatchForm;
+window.clearMatchForm = clearMatchForm;
+window.rescheduleMatch = rescheduleMatch;
 
 // Start
 window.addEventListener('DOMContentLoaded', init);
