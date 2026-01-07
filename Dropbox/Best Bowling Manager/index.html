@@ -1951,45 +1951,33 @@ function openMatchForm(matchId) {
 
   html += '</div>'; // End side-by-side grid
 
-  // Points section
-  html += '<div style="background:#111827;border:1px solid #1f2937;border-radius:0.5rem;padding:1rem;margin-top:1rem;">';
-  html += '<div class="small" style="font-weight:600;margin-bottom:0.75rem;">Points <span class="muted" style="font-weight:400;">(auto-calculated, click to edit)</span></div>';
-  html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;">';
-  
-  // Game 1 points
-  html += '<div style="display:flex;align-items:center;gap:0.5rem;">';
-  html += '<div class="small" style="min-width:60px;">Game 1:</div>';
-  html += '<input type="text" name="ptsG1" value="' + ptsG1 + '" placeholder="A/B" style="width:80px;text-align:center;">';
-  html += '<div class="small muted">Team ' + match.homeTeam + ' / Team ' + match.awayTeam + '</div>';
-  html += '</div>';
-  
-  // Game 2 points
-  html += '<div style="display:flex;align-items:center;gap:0.5rem;">';
-  html += '<div class="small" style="min-width:60px;">Game 2:</div>';
-  html += '<input type="text" name="ptsG2" value="' + ptsG2 + '" placeholder="A/B" style="width:80px;text-align:center;">';
-  html += '<div class="small muted">Team ' + match.homeTeam + ' / Team ' + match.awayTeam + '</div>';
-  html += '</div>';
-  
-  // Series points
-  html += '<div style="display:flex;align-items:center;gap:0.5rem;">';
-  html += '<div class="small" style="min-width:60px;">Series:</div>';
-  html += '<input type="text" name="ptsSeries" value="' + ptsSeries + '" placeholder="A/B" style="width:80px;text-align:center;">';
-  html += '<div class="small muted">Team ' + match.homeTeam + ' / Team ' + match.awayTeam + '</div>';
-  html += '</div>';
-  
-  // Total points (calculated)
+  // Points section (condensed to one line)
   const [g1aPtsCalc, g1bPtsCalc] = ptsG1 ? ptsG1.split('/').map(x => parseInt(x) || 0) : [0, 0];
   const [g2aPtsCalc, g2bPtsCalc] = ptsG2 ? ptsG2.split('/').map(x => parseInt(x) || 0) : [0, 0];
   const [sAptsCalc, sBptsCalc] = ptsSeries ? ptsSeries.split('/').map(x => parseInt(x) || 0) : [0, 0];
   const totalPtsA = g1aPtsCalc + g2aPtsCalc + sAptsCalc;
   const totalPtsB = g1bPtsCalc + g2bPtsCalc + sBptsCalc;
-  html += '<div style="display:flex;align-items:center;gap:0.5rem;grid-column:1/-1;padding-top:0.5rem;border-top:1px solid #1f2937;margin-top:0.5rem;">';
-  html += '<div class="small" style="font-weight:600;min-width:60px;">Total:</div>';
-  html += '<div class="small" style="color:#93c5fd;"><strong>' + totalPtsA + '</strong> Team ' + match.homeTeam + '</div>';
-  html += '<div class="small muted">|</div>';
-  html += '<div class="small" style="color:#6ee7b7;"><strong>' + totalPtsB + '</strong> Team ' + match.awayTeam + '</div>';
-  html += '</div>';
   
+  html += '<div style="background:#111827;border:1px solid #1f2937;border-radius:0.5rem;padding:0.75rem;margin-top:1rem;">';
+  html += '<div style="display:flex;align-items:center;gap:0.75rem;flex-wrap:wrap;">';
+  html += '<div class="small" style="font-weight:600;">Points:</div>';
+  html += '<div style="display:flex;align-items:center;gap:0.5rem;">';
+  html += '<label class="small muted">G1</label>';
+  html += '<input type="text" name="ptsG1" value="' + ptsG1 + '" placeholder="A/B" style="width:50px;text-align:center;">';
+  html += '</div>';
+  html += '<div style="display:flex;align-items:center;gap:0.5rem;">';
+  html += '<label class="small muted">G2</label>';
+  html += '<input type="text" name="ptsG2" value="' + ptsG2 + '" placeholder="A/B" style="width:50px;text-align:center;">';
+  html += '</div>';
+  html += '<div style="display:flex;align-items:center;gap:0.5rem;">';
+  html += '<label class="small muted">Series</label>';
+  html += '<input type="text" name="ptsSeries" value="' + ptsSeries + '" placeholder="A/B" style="width:50px;text-align:center;">';
+  html += '</div>';
+  html += '<div class="small muted">|</div>';
+  html += '<div class="small" style="font-weight:600;">Total:</div>';
+  html += '<div class="small" style="color:#93c5fd;"><strong>' + totalPtsA + '</strong></div>';
+  html += '<div class="small muted">-</div>';
+  html += '<div class="small" style="color:#6ee7b7;"><strong>' + totalPtsB + '</strong></div>';
   html += '</div></div>';
 
   // Handicap adjustment section (collapsible/compact)
